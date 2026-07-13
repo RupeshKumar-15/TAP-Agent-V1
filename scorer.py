@@ -1,8 +1,27 @@
-# scorer.py — v9: 6-dimension scoring engine, adjacency-aware, full TAP analyst persona
+# scorer.py — v10: 6-dimension scoring engine + LLM semantic alignment (Groq)
 # Dimensions: Focus Alignment (40) + Adjacency Boost (20) + Geography (10) +
 #             CSR Maturity (10) + Budget Size (10) + Source Quality (10) = 100
 import os, re, yaml
 from utils import all_sources_tried, any_source_found, best_source_quality, combine_source_texts
+
+# Semantic scoring (Groq LLM) — lazy import so the tool works without it
+try:
+    from llm import semantic_alignment
+    _LLM_AVAILABLE = True
+except ImportError:
+    _LLM_AVAILABLE = False
+    def semantic_alignment(*a, **kw): return None
+
+_DEFAULT_MISSION = (
+    "The Apprentice Project (TAP) develops 21st-century skills (critical thinking, "
+    "creativity, confidence, communication, problem-solving, self-awareness, "
+    "financial literacy) for low-income middle and high school students in India, "
+    "delivered through TAP Buddy — an AI-powered WhatsApp chatbot with video "
+    "electives (Coding, Science, Visual Arts, Financial Literacy). TAP works "
+    "exclusively in government schools with partners like MCD, DoE Delhi, BMC "
+    "Mumbai and SCERT Maharashtra. TAP does NOT run vocational training or job "
+    "placement."
+)
 
 
 def _kw_in(text_lower: str, kw: str) -> bool:
@@ -433,10 +452,52 @@ def score(company: str, sources: list, parsed: dict) -> dict:
     # Focus alignment with adjacency-aware depth
     fa_score,  fa_matched = _score_focus(parsed.get("focus_areas", []), cfg,
                                           adj_fired=adj_fired)
+
+    # ── Semantic alignment (LLM) — lifts focus score when keywords miss meaning
+    # e.g. "digital inclusion" ≈ TAP's digital literacy but scores 0 on keywords.
+    # The LLM score can only RAISE the focus dimension, never lower it, and the
+    # whole step degrades silently to keyword-only scoring on any failure.
+    sem = None
+    sem_cfg = cfg.get("semantic_scoring", {})
+    if _LLM_AVAILABLE and sem_cfg.get("enabled", True):
+        evidence = combine_source_texts(sources)
+        if evidence.strip():
+            sem = semantic_alignment(
+                company,
+                cfg.get("org_mission", _DEFAULT_MISSION),
+                evidence,
+            )
+    if sem:
+        sem_focus = round(40 * sem["score"] / 100)
+        if sem_focus > fa_score:
+            fa_matched = list(fa_matched) + \
+                         [f"semantic: {t}" for t in sem.get("themes", [])[:4]]
+            fa_score = sem_focus
+        # LLM-detected misalignment feeds the strict-penalty pass
+        flags = [f.lower() for f in sem.get("flags", [])]
+        if any("vocational" in f or "employability" in f for f in flags):
+            parsed.setdefault("ai_flags", {})["is_employability_only"] = True
+        if any("higher_ed" in f or "higher-ed" in f for f in flags):
+            parsed.setdefault("ai_flags", {})["is_higher_ed_only"] = True
     geo_score, geo_label  = _score_geography(parsed.get("geography", []), cfg)
     mat_score, mat_found  = _score_maturity(sources, cfg)
     bud_score, bud_label  = _score_budget(parsed.get("spend", {}), cfg)
     src_score, src_name   = _score_source_quality(sources, cfg)
+
+    # Rescale native sub-scores (fa/40, adj/20, others/10) to config weights
+    _w    = cfg.get("weights", {}) or {}
+    W_FA  = _w.get("focus_alignment", 55)
+    W_ADJ = _w.get("adjacency_boost", 15)
+    W_GEO = _w.get("geography_fit", 10)
+    W_MAT = _w.get("csr_maturity", 10)
+    W_BUD = _w.get("budget_size", 5)
+    W_SRC = _w.get("source_quality", 5)
+    fa_score  = round(fa_score  / 40 * W_FA)
+    adj_score = round(adj_score / 20 * W_ADJ)
+    geo_score = round(geo_score / 10 * W_GEO)
+    mat_score = round(mat_score / 10 * W_MAT)
+    bud_score = round(bud_score / 10 * W_BUD)
+    src_score = round(src_score / 10 * W_SRC)
 
     raw_total = fa_score + adj_score + geo_score + mat_score + bud_score + src_score
     if state == "NOT_FOUND_IN_SOURCE":
@@ -450,18 +511,24 @@ def score(company: str, sources: list, parsed: dict) -> dict:
     tier = get_scoring_tier(total)
 
     breakdown = {
-        "focus_alignment": {"score": fa_score,  "max": 40,
-                             "matched": fa_matched, "label": f"{fa_score}/40"},
-        "adjacency_boost": {"score": adj_score, "max": 20,
-                             "fired_clusters": adj_fired, "label": f"{adj_score}/20"},
-        "geography_fit":   {"score": geo_score, "max": 10, "label": geo_label},
-        "csr_maturity":    {"score": mat_score, "max": 10,
-                             "signals": mat_found, "label": f"{mat_score}/10"},
-        "budget_size":     {"score": bud_score, "max": 10, "label": bud_label},
-        "source_quality":  {"score": src_score, "max": 10,
-                             "source": src_name, "label": f"{src_score}/10"},
+        "focus_alignment": {"score": fa_score,  "max": W_FA,
+                             "matched": fa_matched, "label": f"{fa_score}/{W_FA}"},
+        "adjacency_boost": {"score": adj_score, "max": W_ADJ,
+                             "fired_clusters": adj_fired, "label": f"{adj_score}/{W_ADJ}"},
+        "geography_fit":   {"score": geo_score, "max": W_GEO, "label": geo_label},
+        "csr_maturity":    {"score": mat_score, "max": W_MAT,
+                             "signals": mat_found, "label": f"{mat_score}/{W_MAT}"},
+        "budget_size":     {"score": bud_score, "max": W_BUD, "label": bud_label},
+        "source_quality":  {"score": src_score, "max": W_SRC,
+                             "source": src_name, "label": f"{src_score}/{W_SRC}"},
         "penalties":       penalties_applied,
         "raw_score":       raw_total,
+        "semantic_alignment": {
+            "used":      bool(sem),
+            "score":     sem.get("score") if sem else None,
+            "rationale": sem.get("rationale", "") if sem else "",
+            "themes":    sem.get("themes", []) if sem else [],
+        },
     }
 
     insight = generate_strategic_insight(
@@ -472,6 +539,8 @@ def score(company: str, sources: list, parsed: dict) -> dict:
         total,
         delivery=parsed.get("csr_delivery_model"),
     )
+    if sem and sem.get("rationale"):
+        insight = f"{insight} AI semantic analysis: {sem['rationale']}"
 
     return {
         "state":            state,

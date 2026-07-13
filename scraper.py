@@ -1,4 +1,4 @@
-# scraper.py — verified multi-source fetcher with MCA deep-search
+# scraper.py — verified multi-source fetcher with MCA deep-search (v6)
 """
 Six sources, in priority order. NEW in v5:
   - Source 5: funded / implementation partners
@@ -81,31 +81,182 @@ def _fetch_pdf(url: str, max_chars: int = 20000, max_pages: int = 40) -> str:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Source 1 — Company's India CSR / sustainability page
+# Source 1 — Company's India CSR / sustainability page  (v6: robust discovery)
 # ─────────────────────────────────────────────────────────────────────────────
+# Strategy (replaces blind URL-pattern guessing):
+#   Step 1: build candidate domains (name slugs × .com/.in/.co.in) AND discover
+#           the real domain via web search — handles non-standard domains
+#   Step 2: fetch each live homepage and follow links whose anchor text or href
+#           looks CSR-related — handles non-standard site structures
+#   Step 3: probe an expanded list of common CSR paths on live domains
+#   Step 4: scan sitemap.xml for CSR-like URLs
+#   Step 5: multi-query web search fallback (accepts PDF results too)
+# A fetch budget caps total HTTP requests so screen mode stays fast.
 
-def fetch_india_csr_page(company: str) -> dict:
-    slug = re.sub(r"[^a-z0-9]", "", company.lower().split()[0])
+from urllib.parse import urlparse, urljoin
 
-    for url in [
-        f"https://www.{slug}.com/in/en/about/csr",
-        f"https://www.{slug}.com/india/csr",
-        f"https://www.{slug}.com/sustainability",
-        f"https://www.{slug}.com/corporate-social-responsibility",
-        f"https://www.{slug}.com/en/about/sustainability",
-    ]:
-        text = _fetch(url)
-        if text and len(text) > 600 and _csr_relevant(text) and _mentions_company(company, text):
-            return make_source("india_csr_page", 1, url, text, "FOUND", "direct")
+_CSR_LINK_RE = re.compile(
+    r"(csr|corporate[\s_-]?social|social[\s_-]?responsib|sustainab|esg|"
+    r"social[\s_-]?impact|citizenship|community[\s_-]?(initiativ|develop|engag)|"
+    r"responsible[\s_-]?business|foundation|giving[\s_-]?back)", re.I)
 
-    for r in _search(f'"{company}" India CSR sustainability "corporate social"')[:5]:
-        url  = r.get("href","")
-        body = r.get("body","")
-        if not url or any(s in url for s in ["youtube","twitter","linkedin","wikipedia"]):
+# Links that look CSR-ish but never contain CSR programme evidence
+_NEG_LINK_RE = re.compile(
+    r"(career|job|vacanc|recruit|login|sign-?in|privacy|cookie|terms|"
+    r"disclaimer|sitemap|contact-?us)", re.I)
+
+_CSR_PATHS = [
+    "/csr", "/corporate-social-responsibility", "/sustainability",
+    "/social-responsibility", "/esg", "/corporate-responsibility",
+    "/about/csr", "/about-us/csr", "/company/csr", "/in/en/about/csr",
+    "/india/csr", "/en/about/sustainability", "/about/sustainability",
+    "/social-impact", "/corporate-citizenship",
+]
+
+_AGGREGATOR_DOMAINS = (
+    "youtube.", "twitter.", "x.com", "facebook.", "instagram.", "linkedin.",
+    "wikipedia.", "glassdoor.", "indeed.", "crunchbase.", "bloomberg.",
+    "zaubacorp", "tofler.", "justdial.", "indiamart.", "ambitionbox.",
+    "moneycontrol.", "economictimes.", "livemint.", "reuters.",
+)
+
+def _company_tokens(company: str) -> list:
+    return [t for t in re.sub(r"[^a-z0-9 ]", " ", company.lower()).split()
+            if len(t) > 2 and t not in _GENERIC_TOKENS]
+
+def _candidate_domains(company: str) -> list:
+    """Slug-based domain guesses across common Indian corporate TLDs."""
+    tokens = _company_tokens(company) or [re.sub(r"[^a-z0-9]", "", company.lower())]
+    slugs = list(dict.fromkeys(["".join(tokens), tokens[0]]))
+    return [f"www.{s}{tld}" for s in slugs if s
+            for tld in (".com", ".in", ".co.in")]
+
+def _discover_domain(company: str) -> str:
+    """Find the company's real website domain via web search."""
+    tokens = _company_tokens(company)
+    acronym = "".join(t[0] for t in tokens) if len(tokens) >= 2 else ""
+    for r in _search(f'"{company}" official website India', max_results=5):
+        host = urlparse(r.get("href", "")).netloc.lower()
+        if not host or any(a in host for a in _AGGREGATOR_DOMAINS):
             continue
-        text = _fetch(url) or body
-        if text and len(text) > 300 and _csr_relevant(text) and _mentions_company(company, text):
-            return make_source("india_csr_page", 1, url, text, "FOUND", "search")
+        if _NEG_LINK_RE.search(host):        # careers.unilever.com etc.
+            continue
+        host_base = host.replace("www.", "").split(".")[0]
+        # match a name token (unilever → unilever.com) or acronym (HUL → hul.co.in)
+        if any(t in host for t in tokens) or (acronym and host_base == acronym):
+            return host
+    return ""
+
+def _accept(company: str, text: str, min_len: int = 600) -> bool:
+    return bool(text) and len(text) > min_len and \
+           _csr_relevant(text) and _mentions_company(company, text)
+
+def _csr_links_from_html(base_url: str, html: str, limit: int = 4) -> list:
+    """Rank links on a page by how CSR-like their href + anchor text are."""
+    scored = []
+    try:
+        soup = BeautifulSoup(html, "lxml")
+        for a in soup.find_all("a", href=True):
+            href = a["href"]
+            if href.startswith(("#", "mailto:", "javascript:", "tel:")):
+                continue
+            anchor = a.get_text(" ", strip=True)[:80]
+            if _NEG_LINK_RE.search(href) or _NEG_LINK_RE.search(anchor):
+                continue
+            score = (2 if _CSR_LINK_RE.search(href) else 0) + \
+                    (1 if _CSR_LINK_RE.search(anchor) else 0)
+            if score:
+                scored.append((score, urljoin(base_url, href)))
+    except Exception:
+        pass
+    scored.sort(key=lambda x: -x[0])
+    seen, out = set(), []
+    for _, u in scored:
+        if u not in seen:
+            seen.add(u)
+            out.append(u)
+        if len(out) >= limit:
+            break
+    return out
+
+def _sitemap_csr_urls(domain: str, limit: int = 3) -> list:
+    """Pull CSR-like URLs out of the site's sitemap.xml (if any)."""
+    try:
+        resp = get_session().get(f"https://{domain}/sitemap.xml", timeout=8)
+        resp.raise_for_status()
+        urls = re.findall(r"<loc>\s*([^<\s]+)\s*</loc>", resp.text)[:500]
+        return [u for u in urls if _CSR_LINK_RE.search(u)][:limit]
+    except Exception:
+        return []
+
+
+def fetch_india_csr_page(company: str, max_fetches: int = 14) -> dict:
+    tried, budget = set(), [max_fetches]
+
+    def _try(url: str, method: str, min_len: int = 600, pdf: bool = False):
+        """Fetch url (once, within budget); return a source dict if it passes."""
+        if not url or url in tried or budget[0] <= 0:
+            return None
+        tried.add(url)
+        budget[0] -= 1
+        text = _fetch_pdf(url) if pdf else _fetch(url)
+        if _accept(company, text, min_len):
+            return make_source("india_csr_page", 1, url, text, "FOUND", method)
+        return None
+
+    # Step 1 — candidate domains: search-discovered first (most reliable), then guesses
+    domains = list(dict.fromkeys(
+        ([_discover_domain(company)] if budget else []) + _candidate_domains(company)
+    ))
+    domains = [d for d in domains if d]
+
+    live = []          # (domain, homepage_html)
+    for domain in domains:
+        if budget[0] <= 0 or len(live) >= 2:
+            break
+        try:
+            resp = get_session().get(f"https://{domain}", timeout=8)
+            budget[0] -= 1
+            if resp.ok and _mentions_company(company, resp.text):
+                live.append((domain, resp.text))
+        except Exception:
+            continue
+
+    for domain, html in live:
+        # Step 2 — follow CSR-looking links from the homepage (non-standard structures)
+        for link in _csr_links_from_html(f"https://{domain}", html):
+            src = _try(link, "homepage_link", pdf=link.lower().endswith(".pdf"))
+            if src:
+                return src
+        # Step 3 — expanded common-path probing
+        for path in _CSR_PATHS[:8]:
+            src = _try(f"https://{domain}{path}", "direct")
+            if src:
+                return src
+        # Step 4 — sitemap scan
+        for u in _sitemap_csr_urls(domain):
+            src = _try(u, "sitemap", pdf=u.lower().endswith(".pdf"))
+            if src:
+                return src
+
+    # Step 5 — search fallback (multiple phrasings; accepts PDFs)
+    budget[0] = max(budget[0], 4)   # always allow the fallback a few fetches
+    for query in [
+        f'"{company}" India CSR sustainability "corporate social"',
+        f'"{company}" "corporate social responsibility" India initiatives',
+        f'"{company}" CSR report India filetype:pdf',
+    ]:
+        for r in _search(query, max_results=5):
+            url  = r.get("href", "")
+            body = r.get("body", "")
+            if not url or any(a in url for a in _AGGREGATOR_DOMAINS):
+                continue
+            src = _try(url, "search", min_len=300, pdf=url.lower().endswith(".pdf"))
+            if src:
+                return src
+            # accept the search snippet itself as weak evidence
+            if _accept(company, body, 300):
+                return make_source("india_csr_page", 1, url, body, "FOUND", "snippet")
 
     return make_source("india_csr_page", 1, status="NOT_FOUND")
 

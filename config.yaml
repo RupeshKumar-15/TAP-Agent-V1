@@ -4,12 +4,12 @@
 
 # ── Scoring weights (must sum to 100) ────────────────────────────────────────
 weights:
-  focus_alignment:  40    # How closely CSR focus matches TAP's exact mission
-  adjacency_boost:  20    # Adjacent/related programs that create partnership opportunity
+  focus_alignment:  55    # How closely CSR focus matches TAP's exact mission (education-first)
+  adjacency_boost:  15    # Adjacent/related programs that create partnership opportunity
   geography_fit:    10    # India presence and relevant states
   csr_maturity:     10    # How structured/mature is their CSR programme
-  budget_size:      10    # India CSR spend (unknown → neutral 5, not 0)
-  source_quality:   10    # Quality of sources where evidence was found
+  budget_size:      5     # India CSR spend (unknown → neutral, not 0)
+  source_quality:   5     # Quality of sources where evidence was found
 
 # ── TAP's exact focus areas (for Focus Alignment scoring) ────────────────────
 # TAP = 21st-century skills & mindsets (critical thinking, creativity,
@@ -436,3 +436,24 @@ budget_false_positives:
   - "raised in funding"
   - "valuation of"
   - "net profit"
+
+# ── Semantic alignment scoring (LLM) ─────────────────────────────────────────
+# Reads org_mission + fetched CSR evidence and judges alignment by MEANING.
+# Can only RAISE the focus-alignment dimension (never lower it).
+# Requires GROQ_API_KEY in .env — silently disabled otherwise.
+semantic_scoring:
+  enabled: true
+  provider: groq
+  model: llama-3.3-70b-versatile
+
+# The mission the LLM scores companies against. Forkers: replace with your
+# own organisation's mission to reuse this tool.
+org_mission: >
+  The Apprentice Project (TAP) develops 21st-century skills (critical
+  thinking, creativity, confidence, communication, problem-solving,
+  self-awareness, financial literacy) for low-income middle and high school
+  students in India, delivered through TAP Buddy — an AI-powered WhatsApp
+  chatbot with video electives (Coding, Science, Visual Arts, Financial
+  Literacy). TAP works exclusively in government schools with partners like
+  MCD, DoE Delhi, BMC Mumbai and SCERT Maharashtra. TAP does NOT run
+  vocational training or job placement.

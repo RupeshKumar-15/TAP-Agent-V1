@@ -180,8 +180,15 @@ def generate_html_report(company: str, result: dict, mode: str = "deep") -> str:
     dim_map = _dim_labels()
     bars_html = ""
     for dim, info in breakdown.items():
+        if not (isinstance(info, dict) and "score" in info and "max" in info):
+            continue   # skip penalties (list), raw_score (int), semantic_alignment
         lbl, col = dim_map.get(dim, (dim, "#6b7280"))
         bars_html += _bar(lbl, info.get("score",0), info.get("max",10), col)
+
+    sem_bd = breakdown.get("semantic_alignment", {})
+    if isinstance(sem_bd, dict) and sem_bd.get("used"):
+        bars_html += _bar("AI Semantic Alignment",
+                          sem_bd.get("score") or 0, 100, "#7c3aed")
 
     # ── Adjacency clusters ────────────────────────────────────────────────────
     adj_html = ""

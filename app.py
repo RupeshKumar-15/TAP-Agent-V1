@@ -13,12 +13,6 @@ import sys
 import os
 import streamlit as st
 
-try:
-    from dotenv import load_dotenv
-    load_dotenv()  # loads ANTHROPIC_API_KEY etc. from .env into os.environ
-except ImportError:
-    pass  # python-dotenv not installed; env vars can still be set manually
-
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from scraper       import fetch_screen_sources, fetch_deep_sources
@@ -461,10 +455,20 @@ if go and company.strip():
             for dim, info_d in breakdown.items():
                 if not isinstance(info_d, dict):
                     continue   # skip "penalties" list and "raw_score" int
+                if dim == "semantic_alignment":
+                    continue   # rendered separately below
                 s  = info_d.get("score", 0)
                 mx = info_d.get("max", 10)
                 st.markdown(f"**{dim_label(dim)}** `{s}/{mx}`")
                 st.progress(s / mx if mx else 0)
+
+            sem_bd = breakdown.get("semantic_alignment", {})
+            if isinstance(sem_bd, dict) and sem_bd.get("used"):
+                sem_s = sem_bd.get("score") or 0
+                st.markdown(f"**🤖 AI Semantic Alignment** `{sem_s}/100`")
+                st.progress(min(max(sem_s / 100, 0.0), 1.0))
+                if sem_bd.get("themes"):
+                    st.caption("Themes: " + ", ".join(sem_bd["themes"]))
 
         with insight_col:
             st.markdown("#### 🧠 Strategic Insight")

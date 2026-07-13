@@ -198,11 +198,21 @@ def generate_docx_report(company: str, result: dict, mode: str = "deep") -> byte
     dims = {"focus_alignment": "Focus Alignment", "adjacency_boost": "Adjacency Boost",
             "geography_fit": "Geography", "csr_maturity": "CSR Maturity",
             "budget_size": "Budget", "source_quality": "Source Quality"}
-    bt = doc.add_table(rows=len(breakdown), cols=12)
+    bar_rows = {k: v for k, v in breakdown.items()
+                if isinstance(v, dict) and "score" in v and "max" in v}
+    bt = doc.add_table(rows=len(bar_rows), cols=12)
     bt.autofit = False
-    for i, (dim, info) in enumerate(breakdown.items()):
+    for i, (dim, info) in enumerate(bar_rows.items()):
         _score_bar(bt.rows[i], dims.get(dim, dim),
                    info.get("score", 0), info.get("max", 10), PURPLE_HX)
+
+    sem = breakdown.get("semantic_alignment", {})
+    if isinstance(sem, dict) and sem.get("used"):
+        p = doc.add_paragraph()
+        r = p.add_run(f"AI Semantic Alignment: {sem.get('score', 0)}/100")
+        r.bold = True
+        if sem.get("rationale"):
+            _small(p.add_run("  —  " + sem["rationale"]), 8.5, GREY)
 
     # ── CSR spend ────────────────────────────────────────────────────────────
     spend = data.get("spend", {})
