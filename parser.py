@@ -536,6 +536,57 @@ def verify_facts(parsed: dict, sources: list) -> dict:
 # Master parse
 # ─────────────────────────────────────────────────────────────────────────────
 
+def extract_partnership_plans(sources: list, company: str = "") -> dict:
+    """
+    Source-7 signals: NGO collaborations, announced/future CSR plans, and
+    leadership statements on education. Sentence-level scan over ALL found
+    sources (not just plans_search), so annual reports contribute too.
+    """
+    collab_kw = ["partnered with", "partnership with", "in collaboration with",
+                 "implementing partner", "implementation partner", "ngo partner",
+                 "mou with", "joined hands with", "tie-up with", "tied up with",
+                 "collaborated with", "alliance with"]
+    plan_kw   = ["will invest", "announced", "announces", "plans to", "commits",
+                 "committed to", "pledge", "aims to", "to launch", "will launch",
+                 "upcoming", "roadmap", "next phase", "by 2027", "by 2028"]
+    lead_kw   = ["ceo", "chairman", "chairperson", "managing director",
+                 "csr head", "head of csr", "chief sustainability", "said"]
+    _relevant = ["csr", "education", "school", "skill", "student", "learning",
+                 "ngo", "foundation", "literacy", "children", "youth"]
+
+    out  = {"collaborations": [], "future_plans": [], "leadership_statements": []}
+    seen = set()
+
+    def _scan(sent: str, sname: str, surl: str):
+        sent = sent.strip()
+        if not (40 <= len(sent) <= 400):
+            return
+        sl = sent.lower()
+        if not any(k in sl for k in _relevant):
+            return
+        key = sl[:80]
+        if key in seen:
+            return
+        item = {"excerpt": sent, "source": sname, "url": surl}
+        if any(k in sl for k in collab_kw) and len(out["collaborations"]) < 5:
+            seen.add(key); out["collaborations"].append(item)
+        elif any(k in sl for k in plan_kw) and len(out["future_plans"]) < 5:
+            seen.add(key); out["future_plans"].append(item)
+        elif any(k in sl for k in lead_kw) and len(out["leadership_statements"]) < 5:
+            seen.add(key); out["leadership_statements"].append(item)
+
+    for s in sources:
+        if s.get("status") != "FOUND":
+            continue
+        sname, surl = s.get("source_name", ""), s.get("url", "")
+        for sent in re.split(r"(?<=[.!?])\s+", s.get("text", "")):
+            _scan(sent, sname, surl)
+        for hit in s.get("plan_hits", []):
+            _scan(f"{hit.get('title','')}: {hit.get('snippet','')}",
+                  "plans_search", hit.get("url", ""))
+    return out
+
+
 def parse_all(sources: list, company: str = "") -> dict:
     parsed = {
         "spend":             extract_india_spend(sources),
@@ -546,6 +597,7 @@ def parse_all(sources: list, company: str = "") -> dict:
         "geography":         extract_geography(sources),
         "decision_makers":   extract_decision_makers(sources, company),
         "csr_delivery_model": detect_csr_model(sources),
+        "partnership_plans": extract_partnership_plans(sources, company),
     }
     parsed["verification"] = verify_facts(parsed, sources)
     return parsed

@@ -206,6 +206,22 @@ adjacency_clusters:
       this as a weak signal, not a match.
     boost: 6
 
+  ngo_collaboration:
+    label: "Active NGO Collaborations"
+    keywords:
+      - "implementing partner"
+      - "implementation partner"
+      - "ngo partner"
+      - "partnered with"
+      - "in collaboration with"
+      - "joined hands with"
+      - "mou with"
+    tap_reasoning: >
+      The company already funds and delivers CSR through NGO implementation
+      partners — TAP fits an existing collaboration model, so onboarding
+      friction and due-diligence barriers are low.
+    boost: 8
+
 # Cap on total adjacency boost (prevents unrealistic over-scoring)
 max_adjacency_boost: 20
 

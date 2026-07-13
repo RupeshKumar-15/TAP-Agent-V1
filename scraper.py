@@ -456,6 +456,63 @@ def fetch_people_sources(company: str) -> dict:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Source 7 — Partnerships, announced plans & leadership statements (NEW)
+# ─────────────────────────────────────────────────────────────────────────────
+
+_PLAN_QUERIES = [
+    # NGO collaborations (highest priority)
+    '"{c}" CSR "partnered with" OR "partnership with" NGO education India 2026 2025',
+    '"{c}" foundation NGO collaboration education programme India announced',
+    # Future plans / commitments
+    '"{c}" CSR education initiative announces OR launch OR "will invest" India 2026',
+    # Leadership statements
+    '"{c}" "CSR head" OR CEO education skilling India interview statement',
+]
+
+
+def fetch_plans_source(company: str, max_pages: int = 3) -> dict:
+    """
+    Source 7: forward-looking signals — recent NGO collaborations, announced
+    CSR plans/commitments, and leadership statements on education.
+    Fetches up to `max_pages` full pages; search snippets are kept as
+    'plan_hits' for the parser/UI even when pages can't be fetched.
+    """
+    hits, texts, first_url = [], [], ""
+    for q in _PLAN_QUERIES:
+        for r in _search(q.format(c=company), max_results=4):
+            url   = r.get("href", "")
+            title = r.get("title", "")
+            body  = r.get("body", "")
+            if not url or any(s in url for s in
+                              ["youtube", "twitter", "facebook", "instagram"]):
+                continue
+            if not _mentions_company(company, f"{title} {body}"):
+                continue
+            hits.append({"title": title, "snippet": body, "url": url})
+            if len(texts) < max_pages:
+                text = (_fetch_pdf(url) if url.lower().endswith(".pdf")
+                        else _fetch(url)) or body
+                if text and len(text) > 300 and _csr_relevant(text) \
+                        and _mentions_company(company, text):
+                    texts.append(text)
+                    first_url = first_url or url
+        if len(texts) >= max_pages:
+            break
+
+    if not hits and not texts:
+        return make_source("plans_search", 7, status="NOT_FOUND")
+
+    combined = " || ".join(texts) if texts else \
+               " || ".join(f"{h['title']} — {h['snippet']}" for h in hits)
+    src = make_source("plans_search", 7,
+                      first_url or hits[0]["url"],
+                      clean_text(combined, 12000), "FOUND",
+                      "search" if texts else "search_snippets")
+    src["plan_hits"] = hits[:10]
+    return src
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Orchestrators — screen mode (fast) vs deep mode (thorough)
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -477,7 +534,8 @@ def fetch_screen_sources(company: str) -> list:
     s3 = make_source("national_csr_portal",  3, status="NOT_TRIED")
     s5 = make_source("partner_search",       5, status="NOT_TRIED")
     s6 = make_source("people_search",        6, status="NOT_TRIED")
-    return [s1, s2, s3, s4, s5, s6]
+    s7 = make_source("plans_search",         7, status="NOT_TRIED")
+    return [s1, s2, s3, s4, s5, s6, s7]
 
 
 def fetch_deep_sources(company: str, progress_cb=None) -> list:
@@ -496,35 +554,40 @@ def fetch_deep_sources(company: str, progress_cb=None) -> list:
 
     print(f"\n[DEEP RESEARCH] {company}")
 
-    _step("Source 1/6 — India CSR page...")
+    _step("Source 1/7 — India CSR page...")
     s1 = fetch_india_csr_page(company)
     _note(f"  → {s1['status']}  {s1['url'][:60]}")
     time.sleep(0.3)
 
-    _step("Source 2/6 — MCA portal + CIN lookup...")
+    _step("Source 2/7 — MCA portal + CIN lookup...")
     s2 = fetch_mca_portal(company)
     _note(f"  → {s2['status']}")
     time.sleep(0.3)
 
-    _step("Source 3/6 — National CSR Portal...")
+    _step("Source 3/7 — National CSR Portal...")
     s3 = fetch_national_csr_portal(company)
     _note(f"  → {s3['status']}")
     time.sleep(0.3)
 
-    _step("Source 4/6 — Annual report...")
+    _step("Source 4/7 — Annual report...")
     s4 = fetch_annual_report(company)
     _note(f"  → {s4['status']}")
     time.sleep(0.3)
 
-    _step("Source 5/6 — Funded partners...")
+    _step("Source 5/7 — Funded partners...")
     s5 = fetch_partner_source(company)
     _note(f"  → {s5['status']}")
     time.sleep(0.3)
 
-    _step("Source 6/6 — CSR decision-makers (LinkedIn)...")
+    _step("Source 6/7 — CSR decision-makers (LinkedIn)...")
     s6 = fetch_people_sources(company)
     _note(f"  → {s6['status']}")
+    time.sleep(0.3)
 
-    found = sum(1 for s in [s1,s2,s3,s4,s5,s6] if s["status"] == "FOUND")
-    print(f"\n  {found}/6 sources returned data.")
-    return [s1, s2, s3, s4, s5, s6]
+    _step("Source 7/7 — Partnerships & announced plans...")
+    s7 = fetch_plans_source(company)
+    _note(f"  → {s7['status']}")
+
+    found = sum(1 for s in [s1,s2,s3,s4,s5,s6,s7] if s["status"] == "FOUND")
+    print(f"\n  {found}/7 sources returned data.")
+    return [s1, s2, s3, s4, s5, s6, s7]

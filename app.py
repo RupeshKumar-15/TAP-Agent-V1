@@ -2,7 +2,7 @@
 """
 TWO MODES:
   🔍 Prospect Screening  — fast (< 60s), binary qualify/don't qualify
-  🔬 Deep Research       — full investigation, 6 sources, DOCX + HTML report
+  🔬 Deep Research       — full investigation, 7 sources, DOCX + HTML report
 
 Run with:
     streamlit run app.py
@@ -338,16 +338,17 @@ if go and company.strip():
             sources = fetch_screen_sources(company)
             bar.progress(65)
         else:
-            steps = ["Searching India CSR page (1/6)…",
-                     "Searching MCA portal + CIN (2/6)…",
-                     "Searching National CSR Portal (3/6)…",
-                     "Searching Annual Report (4/6)…",
-                     "Finding funded partners (5/6)…",
-                     "Finding CSR decision-makers (6/6)…"]
+            steps = ["Searching India CSR page (1/7)…",
+                     "Searching MCA portal + CIN (2/7)…",
+                     "Searching National CSR Portal (3/7)…",
+                     "Searching Annual Report (4/7)…",
+                     "Finding funded partners (5/7)…",
+                     "Finding CSR decision-makers (6/7)…",
+                     "Finding partnerships & announced plans (7/7)…"]
             step_idx = [0]
             def _cb(msg):
-                step_idx[0] = min(step_idx[0] + 1, 5)
-                bar.progress(10 + step_idx[0] * 10, steps[min(step_idx[0], 5)])
+                step_idx[0] = min(step_idx[0] + 1, 6)
+                bar.progress(10 + step_idx[0] * 9, steps[min(step_idx[0], 6)])
                 info.info(f"🔎 {steps[step_idx[0]]}")
             sources = fetch_deep_sources(company, progress_cb=_cb)
             bar.progress(70)
@@ -560,6 +561,29 @@ if go and company.strip():
         else:
             st.caption("No CSR decision makers identified in public sources.")
 
+        # ── Collaborations & announced plans (Source 7) ───────────────
+        pp = data.get("partnership_plans", {}) or {}
+        if any(pp.get(k) for k in
+               ("collaborations", "future_plans", "leadership_statements")):
+            st.markdown("### 🤝 Collaborations & Announced Plans")
+            _pp_sections = [
+                ("collaborations",        "Recent NGO collaborations"),
+                ("future_plans",          "Announced plans & commitments"),
+                ("leadership_statements", "Leadership statements"),
+            ]
+            for key, label in _pp_sections:
+                items = pp.get(key, [])
+                if not items:
+                    continue
+                st.markdown(f"**{label}**")
+                for it in items:
+                    link = (f' <a href="{it["url"]}" target="_blank" '
+                            f'style="font-size:0.75rem">[source]</a>'
+                            ) if it.get("url") else ""
+                    st.markdown(
+                        f'<div class="partner-row">"{it.get("excerpt","")}"{link}</div>',
+                        unsafe_allow_html=True)
+
         # Data grid
         st.divider()
         left, right = st.columns(2)
@@ -617,6 +641,7 @@ if go and company.strip():
             "global_annual_report":("4️⃣","Annual Report"),
             "partner_search":      ("5️⃣","Funded Partners Search"),
             "people_search":       ("6️⃣","Decision-Makers (LinkedIn)"),
+            "plans_search":        ("7️⃣","Partnerships & Announced Plans"),
         }
         shown = [s for s in result.get("sources",[]) if s.get("status") != "NOT_TRIED"]
         cols = st.columns(3)
@@ -702,7 +727,7 @@ if not go:
     c1, c2, c3, c4 = st.columns(4)
     steps = [
         ("01", "Enter a company", "Type any company with India operations."),
-        ("02", "6-source research", "CSR page, MCA, National CSR Portal, annual report, partners, people."),
+        ("02", "7-source research", "CSR page, MCA, National CSR Portal, annual report, partners, people, plans."),
         ("03", "Evidence & scoring", "Every fact cited, re-verified, and scored across 6 dimensions."),
         ("04", "Share with leadership", "Download a DOCX brief with partners, decision-makers & verification log."),
     ]

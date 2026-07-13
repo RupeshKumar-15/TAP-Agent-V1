@@ -282,6 +282,7 @@ def generate_html_report(company: str, result: dict, mode: str = "deep") -> str:
         "global_annual_report":("4️⃣", "Annual / Sustainability Report"),
         "partner_search":      ("5️⃣", "Funded Partners Search"),
         "people_search":       ("6️⃣", "Decision-Makers (LinkedIn snippets)"),
+        "plans_search":        ("7️⃣", "Partnerships & Announced Plans"),
     }
     src_rows = ""
     for s in sources:

@@ -325,6 +325,7 @@ def generate_docx_report(company: str, result: dict, mode: str = "deep") -> byte
         "global_annual_report": "Annual / sustainability report",
         "partner_search": "Partner-focused web search",
         "people_search": "LinkedIn / people search snippets",
+        "plans_search": "Partnerships & announced-plans search",
     }
     for s in sources:
         if s.get("status") == "NOT_TRIED":
