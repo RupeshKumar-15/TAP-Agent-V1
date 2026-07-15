@@ -5,21 +5,38 @@ import base64
 import json
 import os
 import sys
+import traceback
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from flask import Flask, request  # noqa: E402
 
-from scraper import fetch_screen_sources, fetch_deep_sources        # noqa: E402
-from parser import parse_all                                        # noqa: E402
-from scorer import score as compute_score, _cfg as load_cfg         # noqa: E402
-from methodology import derive_criteria                             # noqa: E402
-from reporter import generate_html_report                           # noqa: E402
-from docx_reporter import generate_docx_report                      # noqa: E402
-from deep_dive_xlsx import generate_deep_dive_xlsx                  # noqa: E402
-from webui import render_home, render_results                       # noqa: E402
+# Import the pipeline defensively: if anything fails to import on Vercel,
+# serve the real traceback instead of an opaque FUNCTION_INVOCATION_FAILED.
+_IMPORT_ERROR = None
+try:
+    from scraper import fetch_screen_sources, fetch_deep_sources
+    from parser import parse_all
+    from scorer import score as compute_score, _cfg as load_cfg
+    from methodology import derive_criteria
+    from reporter import generate_html_report
+    from docx_reporter import generate_docx_report
+    from deep_dive_xlsx import generate_deep_dive_xlsx
+    from webui import render_home, render_results
+except Exception:
+    _IMPORT_ERROR = traceback.format_exc()
 
 app = Flask(__name__)
+
+
+@app.errorhandler(500)
+def _err(e):
+    return "<pre>Internal error — check Vercel runtime logs.</pre>", 500
+
+
+def _import_error_page():
+    return (f"<h3>Import failed on the server</h3>"
+            f"<pre style='white-space:pre-wrap'>{_IMPORT_ERROR}</pre>", 500)
 
 _DOCX_MIME = ("application/vnd.openxmlformats-officedocument."
               "wordprocessingml.document")
@@ -29,11 +46,15 @@ _XLSX_MIME = ("application/vnd.openxmlformats-officedocument."
 
 @app.get("/")
 def home():
+    if _IMPORT_ERROR:
+        return _import_error_page()
     return render_home()
 
 
 @app.post("/research")
 def research():
+    if _IMPORT_ERROR:
+        return _import_error_page()
     company = (request.form.get("company") or "").strip()
     mode    = request.form.get("mode", "screen")
     if mode not in ("screen", "deep"):
