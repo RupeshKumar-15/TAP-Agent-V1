@@ -61,9 +61,27 @@ def _hero() -> str:
             "The Apprentice Project — every claim carries a source citation.</p>")
 
 
+# Plain string (NOT an f-string): the JS braces would break f-string parsing
+_HOME_SCRIPT = """
+<script>
+  // copy the chosen mode into the form as a hidden field
+  var form=document.querySelector('form.search');
+  var h=document.createElement('input');h.type='hidden';h.name='mode';h.value='screen';
+  form.appendChild(h);
+  document.querySelectorAll('.modes input').forEach(function(r){
+    r.addEventListener('change',function(){h.value=r.value;});
+  });
+  form.addEventListener('submit',function(){
+    var b=form.querySelector('button');
+    b.textContent='Researching… please wait';b.disabled=true;
+  });
+</script>
+"""
+
+
 def render_home(error: str = "") -> str:
     err = f"<p style='color:var(--red)'>{_e(error)}</p>" if error else ""
-    body = f"""{_hero()}{err}
+    body = (_hero() + err + """
 <form class="search" method="post" action="/research">
   <input type="text" name="company" placeholder="e.g. Capgemini, HCL Technologies, Bajaj Finserv" required>
   <button type="submit">Research →</button>
@@ -72,22 +90,13 @@ def render_home(error: str = "") -> str:
   <label><input type="radio" name="mode_pick" value="screen" checked> 🔍 Prospect Screening (~1 min)</label>
   <label><input type="radio" name="mode_pick" value="deep"> 🔬 Deep Research (2–4 min)</label>
 </div>
-<script>
-  // copy the chosen mode into the form as a hidden field
-  const form=document.querySelector('form.search');
-  const h=document.createElement('input');h.type='hidden';h.name='mode';h.value='screen';
-  form.appendChild(h);
-  document.querySelectorAll('.modes input').forEach(
-    r=>r.addEventListener('change',()=>{h.value=r.value;}));
-  form.addEventListener('submit',()=>{const b=form.querySelector('button');
-    b.textContent='Researching… please wait';b.disabled=true;});
-</script>
+""" + _HOME_SCRIPT + """
 <h2>How it works</h2>
 <p class="small">Enter a company → the engine researches up to 7 public sources
 (India CSR page, MCA CSR-2, National CSR Portal, annual report, funded partners,
 decision-makers, announced plans) → every fact is extracted with a verbatim
 excerpt → scored 0–100 across 7 dimensions plus the TAP methodology scorecard
-(8 criteria, 0–5). Deep Research adds DOCX / HTML / XLSX downloads.</p>"""
+(8 criteria, 0–5). Deep Research adds DOCX / HTML / XLSX downloads.</p>""")
     return _page(body)
 
 
