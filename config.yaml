@@ -149,7 +149,8 @@ adjacency_clusters:
       - "technology education"
       - "computational thinking"
       - "programming"
-      - "maker"
+      - "maker lab"
+      - "maker space"
       - "hackathon"
       - "innovation lab"
     tap_reasoning: >
@@ -242,20 +243,18 @@ penalties:
 # is a known existing TAP partner (see tap_existing_partners below).
 indirect_alignment_cap: 89
 
-# ── Known existing TAP collaborating partners ────────────────────────────────
-# Ground truth beats the model: these companies already partner with TAP, so
-# their proven collaboration floors the score at tap_partner_floor and
-# exempts them from the indirect-alignment cap. Matched case-insensitively
-# against the company name entered in the tool.
+# ── Internal partner-list annotation (NOT scored, NOT asserted) ─────────────
+# Policy: never assert a fact without a fetched source. This list only adds
+# an internal, clearly-labelled annotation in the JSON breakdown so the team
+# can cross-check routing. It does NOT alter the score and is NOT rendered
+# as a proven relationship in any report.
 tap_existing_partners:
   - "Capgemini"
-  - "Ericsson"
   - "Tenerity"
   - "Bajaj Finserv"
   - "NRB Bearings"
   - "SVP India"
   - "Project Tech4Dev"
-tap_partner_floor: 92
 
 # ── Partner exemplar traits (researched from TAP's REAL partners) ────────────
 # Derived July 2026 from public CSR data of Tenerity, Capgemini, Bajaj

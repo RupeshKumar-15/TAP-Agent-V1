@@ -93,6 +93,12 @@ def research():
             base64.b64encode(xlsx_bytes).decode())
 
         export = dict(result)
+        # THE single verdict, mirrored at the top level of the JSON
+        export["verdict"] = {
+            "tier": meth["tier"]["label"], "average": meth["average"],
+            "action": meth["action"], "source": "methodology_scorecard",
+            "engine_diagnostic_score": result.get("fit_score", 0),
+        }
         export["sources"] = [
             {k: v for k, v in s.items() if k not in ("text", "people_hits")}
             for s in result.get("sources", [])]

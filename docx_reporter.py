@@ -123,6 +123,16 @@ def generate_docx_report(company: str, result: dict, mode: str = "deep") -> byte
     verif     = data.get("verification", {})
     now       = datetime.datetime.now().strftime("%d %B %Y")
 
+    # THE single verdict — derived once from the methodology scorecard.
+    # Every headline in this document uses it; the 0-100 is a diagnostic.
+    meth = None
+    try:
+        from methodology import derive_criteria
+        from scorer import _cfg as _load_cfg
+        meth = derive_criteria(company, result, _load_cfg())
+    except Exception:
+        pass
+
     doc = Document()
     for s in doc.sections:
         s.top_margin = s.bottom_margin = Cm(1.6)
@@ -147,23 +157,40 @@ def generate_docx_report(company: str, result: dict, mode: str = "deep") -> byte
                     f"Prepared by TAP Fundraising Research Agent")
     r3.font.size = Pt(8.5); r3.font.color.rgb = RGBColor(0x9C, 0xA3, 0xAF)
 
-    # ── Executive summary ────────────────────────────────────────────────────
+    # ── Executive summary — headline is the METHODOLOGY VERDICT ─────────────
     _h(doc, "EXECUTIVE SUMMARY")
     t = doc.add_table(rows=1, cols=2)
     t.columns[0].width = Cm(4.2)
     sc = t.rows[0].cells[0]
-    _shade(sc, _fit_hex(fit))
-    sc.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
-    p = sc.paragraphs[0]; p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    r = p.add_run(f"{fit}")
-    r.bold = True; r.font.size = Pt(34); r.font.color.rgb = RGBColor(0xFF,0xFF,0xFF)
-    p = sc.add_paragraph(); p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    r = p.add_run(f"{_fit_label(fit)} / 100")
-    r.bold = True; r.font.size = Pt(10); r.font.color.rgb = RGBColor(0xFF,0xFF,0xFF)
+    if meth:
+        _shade(sc, meth["tier"]["color"].lstrip("#"))
+        sc.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
+        p = sc.paragraphs[0]; p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        r = p.add_run(f"{meth['average']}")
+        r.bold = True; r.font.size = Pt(34); r.font.color.rgb = RGBColor(0xFF,0xFF,0xFF)
+        p = sc.add_paragraph(); p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        r = p.add_run(f"{meth['tier']['label']} / 5")
+        r.bold = True; r.font.size = Pt(10); r.font.color.rgb = RGBColor(0xFF,0xFF,0xFF)
+        p = sc.add_paragraph(); p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        r = p.add_run(f"engine diagnostic {fit}/100")
+        r.font.size = Pt(7.5); r.font.color.rgb = RGBColor(0xEE,0xEE,0xEE)
+    else:
+        _shade(sc, _fit_hex(fit))
+        p = sc.paragraphs[0]; p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        r = p.add_run(f"{fit}")
+        r.bold = True; r.font.size = Pt(34); r.font.color.rgb = RGBColor(0xFF,0xFF,0xFF)
 
     ic = t.rows[0].cells[1]
     _shade(ic, CREAM_HX)
-    ic.paragraphs[0].add_run(insight).font.size = Pt(9.5)
+    if meth:
+        p0 = ic.paragraphs[0]
+        r = p0.add_run(f"Verdict: {meth['verdict_line']}.  ")
+        r.bold = True; r.font.size = Pt(10)
+        r = p0.add_run(meth["action"])
+        r.font.size = Pt(9.5)
+        ic.add_paragraph().add_run(insight).font.size = Pt(9.5)
+    else:
+        ic.paragraphs[0].add_run(insight).font.size = Pt(9.5)
     state_lbl = {"FOUND": "Evidence found across sources",
                  "NOT_FOUND_IN_SOURCE": "Partial research — some sources empty",
                  "CONFIRMED_ABSENT": "No public India CSR evidence"}.get(state, state)
@@ -215,16 +242,7 @@ def generate_docx_report(company: str, result: dict, mode: str = "deep") -> byte
         if sem.get("rationale"):
             _small(p.add_run("  —  " + sem["rationale"]), 8.5, GREY)
 
-    # ── Methodology scorecard — 8 criteria (0–5), per the manual research
-    #    methodology template. Verdict tiers: Priority Hunt / Worth Hunting /
-    #    Conditional Fit / Low Priority.
-    meth = None
-    try:
-        from methodology import derive_criteria
-        from scorer import _cfg as _load_cfg
-        meth = derive_criteria(company, result, _load_cfg())
-    except Exception:
-        pass   # methodology view is additive — never block the brief
+    # ── Methodology scorecard — 8 criteria (0–5); source of the verdict ─────
     if meth:
         _h(doc, "METHODOLOGY SCORECARD — 8 CRITERIA (0–5)")
         tier = meth["tier"]

@@ -11,10 +11,14 @@ from utils import combine_source_texts
 TO_CONFIRM = "To confirm"
 
 METHOD_TIERS = [
-    {"min": 4.0, "label": "Priority Hunt",   "color": "#7C3AED"},
-    {"min": 3.0, "label": "Worth Hunting",   "color": "#16A34A"},
-    {"min": 2.0, "label": "Conditional Fit", "color": "#0EA5E9"},
-    {"min": 0.0, "label": "Low Priority",    "color": "#DC2626"},
+    {"min": 4.0, "label": "Priority Hunt",   "color": "#7C3AED",
+     "action": "Assign a relationship manager and open personalised outreach now."},
+    {"min": 3.0, "label": "Worth Hunting",   "color": "#16A34A",
+     "action": "Prepare a tailored pitch; schedule a discovery call."},
+    {"min": 2.0, "label": "Conditional Fit", "color": "#0EA5E9",
+     "action": "Strengthen the case before outreach; enter only with the right angle."},
+    {"min": 0.0, "label": "Low Priority",    "color": "#DC2626",
+     "action": "Deprioritise; revisit next quarter."},
 ]
 
 
@@ -193,6 +197,10 @@ def derive_criteria(company: str, result: dict, cfg: dict) -> dict:
         "criteria": criteria,
         "average": avg,
         "tier": tier,
+        # THE single verdict: every output's headline must derive from this,
+        # never from the 0-100 engine score (which is a diagnostic).
+        "verdict_line": f"{tier['label']} — {avg} / 5",
+        "action": tier.get("action", ""),
         "csr_head_note": ("CSR head philosophy: not scored, but a deciding "
                           "factor — read their public profile for what they "
                           "champion and fund."),

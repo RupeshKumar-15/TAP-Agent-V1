@@ -151,22 +151,27 @@ def render_results(company: str, mode: str, result: dict, meth: dict,
     download links so the page is fully self-contained (serverless-safe).
     """
     fit   = result.get("fit_score", 0)
-    tier  = result.get("scoring_tier", {}) or {}
-    color = _tier_color(result)
     bd    = result.get("breakdown", {}) or {}
 
+    # SINGLE VERDICT: the methodology scorecard is the source of truth.
+    # The 0-100 engine score is shown only as a diagnostic.
+    v_tier  = meth["tier"]
+    v_avg   = meth["average"]
+    color   = v_tier["color"]
+
     if mode == "screen":
-        if fit >= 80:
+        if v_avg >= 3.0:
             banner = (f"<div class='banner' style='background:#DCFCE7'>✅ "
-                      f"<b>QUALIFY — {fit}/100.</b> Hand to partnership team. "
+                      f"<b>QUALIFY — {_e(meth['verdict_line'])}.</b> "
                       f"Run Deep Research for the full brief.</div>")
-        elif fit >= 45:
+        elif v_avg >= 2.0:
             banner = (f"<div class='banner' style='background:#FEF3C7'>⚠️ "
-                      f"<b>{_e(tier.get('label',''))} — {fit}/100.</b> "
+                      f"<b>{_e(meth['verdict_line'])}.</b> "
                       f"Not partnership-ready yet.</div>")
         else:
             banner = (f"<div class='banner' style='background:#FEE2E2'>⛔ "
-                      f"<b>SKIP — {fit}/100.</b> Low fit — deprioritise.</div>")
+                      f"<b>SKIP — {_e(meth['verdict_line'])}.</b> "
+                      f"Low fit — deprioritise.</div>")
     else:
         banner = ""
 
@@ -187,13 +192,15 @@ def render_results(company: str, mode: str, result: dict, meth: dict,
 {banner}
 <div class="scorecard">
   <div class="scorebox" style="background:{color}">
-    <div class="n">{fit}</div><div>{_e(tier.get('label',''))}</div>
-    <div class="small" style="color:#fff;opacity:0.75">Fit Score / 100</div>
+    <div class="n">{v_avg}</div><div>{_e(v_tier.get('label',''))}</div>
+    <div class="small" style="color:#fff;opacity:0.75">Verdict / 5 ·
+      engine diagnostic {fit}/100</div>
   </div>
-  <div class="insight">{_e(result.get('strategic_insight',''))}</div>
+  <div class="insight"><b>Verdict: {_e(meth['verdict_line'])}.</b>
+    {_e(meth['action'])}<br><br>{_e(result.get('strategic_insight',''))}</div>
 </div>
 {penalties}
-<h2>Score Breakdown</h2>
+<h2>Engine Diagnostics — Score Breakdown</h2>
 {_bars(bd)}
 {_methodology_table(meth)}
 {dls}

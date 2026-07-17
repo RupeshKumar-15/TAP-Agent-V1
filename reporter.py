@@ -191,7 +191,7 @@ def generate_html_report(company: str, result: dict, mode: str = "deep") -> str:
         bars_html += _bar("AI Semantic Alignment",
                           sem_bd.get("score") or 0, 100, "#7c3aed")
 
-    # ── Methodology scorecard (8 criteria, 0–5) ───────────────────────────────
+    # ── Methodology scorecard (8 criteria, 0–5) — THE verdict source ─────────
     meth_html = ""
     try:
         from methodology import derive_criteria
@@ -199,6 +199,18 @@ def generate_html_report(company: str, result: dict, mode: str = "deep") -> str:
         _meth = derive_criteria(company, result, _load_cfg())
     except Exception:
         _meth = None   # additive — never block the report
+
+    # Headline verdict variables (fall back to engine view only if the
+    # methodology module is unavailable)
+    if _meth:
+        v_color    = _meth["tier"]["color"]
+        v_avg      = _meth["average"]
+        v_label    = _meth["tier"]["label"]
+        v_headline = f"Verdict: {_meth['verdict_line']}."
+        v_action   = _meth["action"]
+    else:
+        v_color, v_avg, v_label = sc_color, fit, _score_label(fit)
+        v_headline, v_action = "", ""
     if _meth:
         _tier = _meth["tier"]
         _rows = ""
@@ -386,21 +398,21 @@ def generate_html_report(company: str, result: dict, mode: str = "deep") -> str:
 
 <div class="card">
 
-  <!-- Score + insight -->
+  <!-- Verdict (single source of truth: methodology scorecard) + insight -->
   <div class="score-row">
-    <div class="score-bubble" style="--sc:{sc_color};background:{sc_color}12">
-      <div class="num">{fit}</div>
-      <div class="fit">{_score_label(fit)}</div>
-      <div class="lbl">Fit Score / 100</div>
+    <div class="score-bubble" style="--sc:{v_color};background:{v_color}12">
+      <div class="num">{v_avg}</div>
+      <div class="fit">{v_label}</div>
+      <div class="lbl">Verdict / 5 · engine diagnostic {fit}/100</div>
     </div>
     <div style="flex:1">
       {_state_badge(state)}{_delivery_badge(data.get("csr_delivery_model"))}
-      <div class="insight-box">{insight}</div>
+      <div class="insight-box"><b>{v_headline}</b> {v_action}<br><br>{insight}</div>
     </div>
   </div>
 
-  <!-- Score breakdown -->
-  <h2>Score Breakdown</h2>
+  <!-- Engine diagnostics (0-100 sub-scores) -->
+  <h2>Engine Diagnostics — Score Breakdown</h2>
   {bars_html}
 
   <!-- Methodology scorecard (8 criteria, 0-5) -->

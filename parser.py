@@ -85,6 +85,47 @@ def _kw_find(text_lower: str, kw: str) -> int:
                   text_lower)
     return m.start() if m else -1
 
+
+# ── Context discipline (v11) ─────────────────────────────────────────────────
+# A keyword only counts when it sits inside a CSR/education context window in
+# the SAME passage — not anywhere on the page. This kills matches like
+# "maker" inside a patent-litigation story, or "education" inside a website
+# navigation bar ("Government Research and education Utilities").
+_CONTEXT_KW = ["csr", "corporate social", "social responsibility", "community",
+               "foundation", "programme", "program", "initiative", "education",
+               "students", "school", "learning", "skilling", "training",
+               "nonprofit", "non-profit", "ngo", "volunteer", "beneficiar",
+               "underprivileged", "philanthrop", "schedule vii"]
+
+
+def _looks_like_nav(raw_window: str) -> bool:
+    """Navigation/menu text: dense Title-Case tokens, no sentence punctuation."""
+    words = raw_window.split()
+    if len(words) < 6:
+        return False
+    caps  = sum(1 for w in words if w[:1].isupper())
+    marks = sum(raw_window.count(c) for c in ".!?;")
+    return (caps / len(words)) > 0.6 and marks <= 1
+
+
+def _kw_find_in_context(clow: str, raw: str, kw: str, span: int = 300) -> int:
+    """
+    First occurrence of kw that (a) has CSR/education context nearby — the
+    keyword itself doesn't count as its own context — and (b) is not inside
+    navigation/menu text. Returns -1 if no occurrence qualifies.
+    """
+    ctx = [c for c in _CONTEXT_KW if c != kw.lower()]
+    pat = re.compile(r"(?<![a-z0-9])" + re.escape(kw.lower()) + r"(?![a-z0-9])")
+    for m in pat.finditer(clow):
+        i = m.start()
+        lo, hi = max(0, i - span), i + span
+        if not any(c in clow[lo:hi] for c in ctx):
+            continue
+        if _looks_like_nav(raw[lo:hi]):
+            continue
+        return i
+    return -1
+
 # Source priority for choosing between conflicting spend figures
 _SPEND_SOURCE_RANK = {
     "india_csr_page": 4, "mca_portal": 4, "national_csr_portal": 3,
@@ -185,7 +226,7 @@ def extract_focus_areas(sources: list) -> list:
     seen     = set()
 
     for kw in kws:
-        idx = _kw_find(clow, kw)
+        idx = _kw_find_in_context(clow, combined, kw)
         if idx >= 0 and kw not in seen:
             seen.add(kw)
             sname, surl = _source_label(sources, idx, combined)
@@ -208,7 +249,8 @@ def detect_adjacency_signals(sources: list) -> dict:
     """
     cfg      = _cfg()
     clusters = cfg.get("adjacency_clusters", {})
-    combined = combine_source_texts(sources).lower()
+    raw_combined = combine_source_texts(sources)
+    combined = raw_combined.lower()
     result   = {}
 
     for cid, cluster in clusters.items():
@@ -216,9 +258,8 @@ def detect_adjacency_signals(sources: list) -> dict:
         evidence_excerpts = []
 
         for kw in cluster.get("keywords",[]):
-            idx = _kw_find(combined, kw)
+            idx = _kw_find_in_context(combined, raw_combined, kw)
             if idx >= 0:
-                raw_combined = combine_source_texts(sources)
                 exrpt = excerpt(raw_combined, idx, 180)
                 kws_found.append(kw)
                 evidence_excerpts.append(exrpt)
@@ -308,9 +349,22 @@ def extract_ngo_partners(sources: list, company: str = "") -> list:
     return found[:12]
 
 
+_PROG_JUNK_RE = re.compile(
+    r"@"                                             # "Director @ Praja Foundation"
+    r"|\b(19|20)\d{2}\s*[-–]\s*((19|20)\d{2}|present)\b"  # career date ranges
+    r"|^(director|coordinator|manager|head|lead|officer|consultant|intern)\b",
+    re.IGNORECASE,
+)
+
+
 def extract_programs(sources: list) -> list:
-    """Returns list of dicts {name, source_url, excerpt}."""
-    combined = combine_source_texts(sources)
+    """Returns list of dicts {name, source_url, excerpt}.
+    People-search snippets are excluded — a person's career history is not a
+    company programme."""
+    page_sources = [s for s in sources
+                    if s.get("source_name") not in ("people_search",
+                                                     "linkedin_search")]
+    combined = combine_source_texts(page_sources)
     prog_re  = re.compile(
         r'(?:programme?|initiative|scheme|project|campaign|mission)'
         r'["\s:–]+([A-Z][^\n.]{5,60})',
@@ -319,6 +373,8 @@ def extract_programs(sources: list) -> list:
     found, seen = [], set()
     for m in prog_re.finditer(combined):
         name  = m.group(1).strip().rstrip(".,;")
+        if _PROG_JUNK_RE.search(name):
+            continue   # career history / role line, not a programme
         snip  = window(combined, m.start(), 80, 40).lower()
         if _near_csr(snip) and name not in seen and len(name) > 5:
             seen.add(name)
@@ -369,16 +425,36 @@ def extract_decision_makers(sources: list, company: str = "") -> list:
     """
     found, seen = [], set()
 
+    # Names must be names: 2-4 Title-Case tokens, none of them junk words.
+    _NAME_RE   = re.compile(r"^[A-Z][a-z'’.\-]+(?:\s+[A-Z][a-z'’.\-]+){1,3}$")
+    _NAME_STOP = {"to", "at", "and", "the", "of", "in", "present", "head",
+                  "director", "leader", "leaders", "group", "team", "officer",
+                  "january", "february", "march", "april", "may", "june",
+                  "july", "august", "september", "october", "november",
+                  "december"}
+
     def _add(name, title, surl, stype, exrpt, li_url=""):
-        key = name.lower().strip()
+        name = name.strip()
+        key  = name.lower()
         if key in seen or len(name) < 5 or len(name.split()) < 2:
+            return
+        # Reject strings that do not match a person-name pattern
+        if not _NAME_RE.match(name):
+            return
+        if any(tok.lower().strip(".'-’") in _NAME_STOP for tok in name.split()):
             return
         # Reject the company's own name captured as a person
         if company and (key in company.lower() or company.lower() in key):
             return
+        # Cut the role field at the next name boundary so one person's title
+        # doesn't run into the next person's snippet
+        title = title.strip()
+        _cut = re.search(r"[A-Z][a-z'’.\-]+\s+[A-Z][a-z'’.\-]+\s*[-–]", title)
+        if _cut and _cut.start() > 0:
+            title = title[:_cut.start()].strip(" ,-–|")
         seen.add(key)
         found.append({
-            "name": name.strip(), "title": title.strip()[:90],
+            "name": name, "title": title[:90],
             "source_url": surl, "source_type": stype,
             "excerpt": exrpt,
             "linkedin_url": li_url,
@@ -408,19 +484,21 @@ def extract_decision_makers(sources: list, company: str = "") -> list:
 
     # Pass 2 — names near CSR titles in fetched page/PDF text
     combined = combine_source_texts(sources)
+    # Name groups are case-SENSITIVE (Title Case only); role keywords are
+    # case-insensitive via scoped (?i:...) groups. The old IGNORECASE flag on
+    # the whole pattern let lowercase junk like "sustainability leaders and"
+    # match as a "name".
     patterns = [
         re.compile(
             r"([A-Z][a-z\-]+(?:\s+[A-Z][a-z\-]+){1,3})"
-            r"[\s,–\-]+(chief\s+csr\s+officer|head\s+of\s+csr|"
+            r"[\s,–\-]+((?i:chief\s+csr\s+officer|head\s+of\s+csr|"
             r"csr\s+director|chief\s+sustainability\s+officer|"
             r"sustainability\s+head|head[,\s]+csr|csr\s+head|"
-            r"vp[\s,\-]+csr|chairperson[,\s]+csr\s+committee)",
-            re.IGNORECASE,
+            r"vp[\s,\-]+csr|chairperson[,\s]+csr\s+committee))",
         ),
         re.compile(
-            r"(head\s+of\s+csr|csr\s+director|chief\s+sustainability\s+officer|csr\s+head)"
+            r"((?i:head\s+of\s+csr|csr\s+director|chief\s+sustainability\s+officer|csr\s+head))"
             r"[\s:,–\-]+([A-Z][a-z\-]+(?:\s+[A-Z][a-z\-]+){1,3})",
-            re.IGNORECASE,
         ),
     ]
     for i, pat in enumerate(patterns):
@@ -448,19 +526,25 @@ def detect_csr_model(sources: list) -> dict:
     Evidence-based: signals must literally appear in fetched text.
     """
     cfg      = _cfg().get("csr_delivery_model", {})
-    combined = combine_source_texts(sources)
+    # Delivery model must come from COMPANY pages, never from people-search
+    # profiles (a LinkedIn profile mentioning "employee volunteering" may be
+    # describing a different employer entirely).
+    page_sources = [s for s in sources
+                    if s.get("source_name") not in ("people_search",
+                                                     "linkedin_search")]
+    combined = combine_source_texts(page_sources)
     clow     = combined.lower()
 
     f_hits, i_hits = [], []
     f_ev = i_ev = ""
     for kw in cfg.get("funder_signals", []):
-        idx = _kw_find(clow, kw)
+        idx = _kw_find_in_context(clow, combined, kw)
         if idx >= 0:
             f_hits.append(kw)
             if not f_ev:
                 f_ev = excerpt(combined, idx, 200)
     for kw in cfg.get("implementer_signals", []):
-        idx = _kw_find(clow, kw)
+        idx = _kw_find_in_context(clow, combined, kw)
         if idx >= 0:
             i_hits.append(kw)
             if not i_ev:
@@ -510,10 +594,22 @@ def verify_facts(parsed: dict, sources: list) -> dict:
     checks = []
 
     def _check(field, value, exrpt):
-        probe = _norm(exrpt)[:120]
-        ok = bool(probe) and probe in haystack
+        """
+        Two-level check. String existence alone is NOT verification — a
+        patent-litigation quote can 'exist' under STEM evidence. VERIFIED
+        requires the excerpt to also contain CSR/education context, i.e. the
+        string plausibly supports the claim being made.
+        """
+        probe  = _norm(exrpt)[:120]
+        exists = bool(probe) and probe in haystack
+        if not exists:
+            status = "CHECK MANUALLY"
+        elif any(c in probe for c in _CONTEXT_KW):
+            status = "VERIFIED"
+        else:
+            status = "CONTEXT UNVERIFIED"   # string exists, relevance unproven
         checks.append({"field": field, "value": str(value)[:80],
-                       "status": "VERIFIED" if ok else "CHECK MANUALLY"})
+                       "status": status})
 
     ef = (parsed.get("spend") or {}).get("evidence_fact")
     if ef:

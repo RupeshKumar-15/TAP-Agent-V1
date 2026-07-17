@@ -520,14 +520,13 @@ def generate_strategic_insight(company, state, focus_facts, adj_fired, geography
                 break
 
     geo_str = ", ".join(geo_places) if geo_places else "India"
-    band    = score_band(fit_score)
-    tier    = get_scoring_tier(fit_score)
+    # Verdict language deliberately does NOT appear here: the single verdict
+    # comes from the methodology scorecard (methodology.py) at render time.
+    # The 0-100 is an engine diagnostic, not the call.
     lines.append(
-        f"Assessment: {tier['label']} ({fit_score}/100) — "
-        f"{tier.get('description', band.get('label',''))}. "
-        f"Active in {geo_str}."
+        f"Engine diagnostic score: {fit_score}/100 across the sourced "
+        f"dimensions. Active in {geo_str}."
     )
-    lines.append(f"Recommended action: {tier.get('action', '')}")
     return " ".join(lines)
 
 
@@ -626,18 +625,26 @@ def score(company: str, sources: list, parsed: dict) -> dict:
     parsed["_sources"] = sources  # needed by penalty infra checker
     total, penalties_applied = apply_strict_penalties(raw_total, parsed, cfg)
 
-    # Known existing TAP partner? Ground truth beats the model.
+    # Internal partner-list annotation (NOT a researched fact, NOT scored).
+    # Policy: never assert a fact without a fetched source. The configured
+    # partner list may inform routing, but it must not alter the score or
+    # be rendered as a proven relationship.
     company_l = company.lower().strip()
     is_tap_partner = any(
         p.lower() in company_l or company_l in p.lower()
         for p in cfg.get("tap_existing_partners", [])
     )
+    partner_note = None
+    if is_tap_partner:
+        partner_note = ("Appears on TAP's internal configured partner list — "
+                        "verify with the partnerships team; this is tool "
+                        "configuration, not a finding from fetched sources. "
+                        "Score is unaffected.")
 
     # Indirect-alignment ceiling: education SUPPORTERS score well (Strong
-    # Fit territory) but the 90+ Immediate Target tier is reserved for
-    # companies whose CSR focus DIRECTLY matches TAP's mission.
-    # Existing TAP partners are EXEMPT — collaboration is already proven.
-    if fa_indirect and not is_tap_partner:
+    # Fit territory) but the top tier is reserved for companies whose CSR
+    # focus DIRECTLY matches TAP's mission.
+    if fa_indirect:
         ind_cap = cfg.get("indirect_alignment_cap", 89)
         if total > ind_cap:
             penalties_applied.append({
@@ -645,17 +652,6 @@ def score(company: str, sources: list, parsed: dict) -> dict:
                           "tier reserved for direct mission matches",
                 "deduction": total - ind_cap, "cap_applied": ind_cap})
             total = ind_cap
-
-    # Partner floor: proven TAP collaboration guarantees Immediate Target
-    partner_note = None
-    if is_tap_partner:
-        floor = cfg.get("tap_partner_floor", 92)
-        if total < floor:
-            partner_note = (f"Existing TAP partner — score floored at {floor} "
-                            f"(model scored {total})")
-            total = floor
-        else:
-            partner_note = "Existing TAP partner — proven collaboration"
 
     tier = get_scoring_tier(total)
 
@@ -697,9 +693,8 @@ def score(company: str, sources: list, parsed: dict) -> dict:
     )
     if sem and sem.get("rationale"):
         insight = f"{insight} AI semantic analysis: {sem['rationale']}"
-    if is_tap_partner:
-        insight = (f"{company} is an EXISTING TAP COLLABORATING PARTNER — "
-                   f"relationship already proven. {insight}")
+    # NOTE: the internal partner-list flag is deliberately NOT rendered into
+    # the insight — unsourced assertions must never appear in prose outputs.
 
     return {
         "state":            state,
