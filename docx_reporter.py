@@ -162,35 +162,33 @@ def generate_docx_report(company: str, result: dict, mode: str = "deep") -> byte
     t = doc.add_table(rows=1, cols=2)
     t.columns[0].width = Cm(4.2)
     sc = t.rows[0].cells[0]
+    tier = result.get("scoring_tier", {}) or {}
+    tier_hex = (tier.get("color") or "#6B7280").lstrip("#")
+    _shade(sc, tier_hex)
+    sc.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
+    p = sc.paragraphs[0]; p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    r = p.add_run(f"{fit}")
+    r.bold = True; r.font.size = Pt(34); r.font.color.rgb = RGBColor(0xFF,0xFF,0xFF)
+    p = sc.add_paragraph(); p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    r = p.add_run(f"{tier.get('label', _fit_label(fit))} / 100")
+    r.bold = True; r.font.size = Pt(10); r.font.color.rgb = RGBColor(0xFF,0xFF,0xFF)
+    _src = result.get("score_source", "")
+    sub = ("scored by AI analysis" if _src == "claude_analysis"
+           else "scored by rule engine")
     if meth:
-        _shade(sc, meth["tier"]["color"].lstrip("#"))
-        sc.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
-        p = sc.paragraphs[0]; p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-        r = p.add_run(f"{meth['average']}")
-        r.bold = True; r.font.size = Pt(34); r.font.color.rgb = RGBColor(0xFF,0xFF,0xFF)
-        p = sc.add_paragraph(); p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-        r = p.add_run(f"{meth['tier']['label']} / 5")
-        r.bold = True; r.font.size = Pt(10); r.font.color.rgb = RGBColor(0xFF,0xFF,0xFF)
-        p = sc.add_paragraph(); p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-        r = p.add_run(f"engine diagnostic {fit}/100")
-        r.font.size = Pt(7.5); r.font.color.rgb = RGBColor(0xEE,0xEE,0xEE)
-    else:
-        _shade(sc, _fit_hex(fit))
-        p = sc.paragraphs[0]; p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-        r = p.add_run(f"{fit}")
-        r.bold = True; r.font.size = Pt(34); r.font.color.rgb = RGBColor(0xFF,0xFF,0xFF)
+        sub += f" · methodology {meth['average']}/5"
+    p = sc.add_paragraph(); p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    r = p.add_run(sub)
+    r.font.size = Pt(7.5); r.font.color.rgb = RGBColor(0xEE,0xEE,0xEE)
 
     ic = t.rows[0].cells[1]
     _shade(ic, CREAM_HX)
-    if meth:
-        p0 = ic.paragraphs[0]
-        r = p0.add_run(f"Verdict: {meth['verdict_line']}.  ")
-        r.bold = True; r.font.size = Pt(10)
-        r = p0.add_run(meth["action"])
-        r.font.size = Pt(9.5)
-        ic.add_paragraph().add_run(insight).font.size = Pt(9.5)
-    else:
-        ic.paragraphs[0].add_run(insight).font.size = Pt(9.5)
+    p0 = ic.paragraphs[0]
+    r = p0.add_run(f"Verdict: {tier.get('label','')} — {fit}/100.  ")
+    r.bold = True; r.font.size = Pt(10)
+    r = p0.add_run(tier.get("action", ""))
+    r.font.size = Pt(9.5)
+    ic.add_paragraph().add_run(insight).font.size = Pt(9.5)
     state_lbl = {"FOUND": "Evidence found across sources",
                  "NOT_FOUND_IN_SOURCE": "Partial research — some sources empty",
                  "CONFIRMED_ABSENT": "No public India CSR evidence"}.get(state, state)

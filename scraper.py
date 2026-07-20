@@ -18,11 +18,66 @@ from utils import get_session, clean_text, make_source
 # Search + fetch helpers
 # ─────────────────────────────────────────────────────────────────────────────
 
+def _search_cfg() -> tuple:
+    """Domain blocklist + priority list from config.yaml (cached)."""
+    global _SEARCH_CFG_CACHE
+    try:
+        return _SEARCH_CFG_CACHE
+    except NameError:
+        pass
+    import os
+    import yaml
+    block, priority = [], []
+    try:
+        p = os.path.join(os.path.dirname(__file__), "config.yaml")
+        with open(p, encoding="utf-8") as f:
+            cfg = yaml.safe_load(f) or {}
+        block    = [d.lower() for d in cfg.get("search_domain_blocklist", [])]
+        priority = [d.lower() for d in cfg.get("search_domain_priority", [])]
+    except Exception:
+        pass
+    _SEARCH_CFG_CACHE = (block, priority)
+    return _SEARCH_CFG_CACHE
+
+
+def _official_sources_only(hits: list) -> list:
+    """
+    Search hygiene: drop forum/social/blog results (not evidence), rank
+    official domains (regulators, exchanges, .gov.in) first. The company's
+    own website naturally survives — it is never on the blocklist.
+    """
+    block, priority = _search_cfg()
+
+    def _host(h):
+        url = (h.get("href") or h.get("url") or "").lower()
+        m = re.search(r"https?://([^/]+)", url)
+        return m.group(1) if m else url
+
+    kept = [h for h in hits if not any(b in _host(h) for b in block)]
+    kept.sort(key=lambda h: 0 if any(p in _host(h) for p in priority) else 1)
+    dropped = len(hits) - len(kept)
+    if dropped:
+        print(f"  [search-hygiene] dropped {dropped} non-official result(s)")
+    return kept
+
+
 def _search(query: str, max_results: int = 5) -> list:
+    # Primary: Google Custom Search (reliable, quota-guarded). Results are
+    # normalised to the same {"title","href","body"} shape as ddgs, so
+    # downstream code is provider-agnostic. Fallback: DuckDuckGo.
+    # All results pass the official-sources filter before use.
+    try:
+        import google_search
+        if google_search.available():
+            hits = google_search.search(query, max_results=max_results)
+            if hits:
+                return _official_sources_only(hits)
+    except Exception as e:
+        print(f"  [google-search] {e}")
     try:
         from ddgs import DDGS
         with DDGS() as d:
-            return list(d.text(query, max_results=max_results))
+            return _official_sources_only(list(d.text(query, max_results=max_results)))
     except Exception as e:
         print(f"  [search] {e}")
         return []

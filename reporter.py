@@ -200,17 +200,20 @@ def generate_html_report(company: str, result: dict, mode: str = "deep") -> str:
     except Exception:
         _meth = None   # additive — never block the report
 
-    # Headline verdict variables (fall back to engine view only if the
-    # methodology module is unavailable)
+    # Headline verdict: the merged fit score (Claude analysis when available,
+    # deterministic engine otherwise) with its decision tier. The methodology
+    # scorecard stays as a full section below.
+    _tier      = result.get("scoring_tier", {}) or {}
+    v_color    = _tier.get("color", sc_color)
+    v_avg      = fit
+    v_label    = _tier.get("label", _score_label(fit))
+    v_headline = f"Verdict: {v_label} — {fit}/100."
+    v_action   = _tier.get("action", "")
+    _src       = result.get("score_source", "")
+    v_sub      = ("scored by AI analysis" if _src == "claude_analysis"
+                  else "scored by rule engine")
     if _meth:
-        v_color    = _meth["tier"]["color"]
-        v_avg      = _meth["average"]
-        v_label    = _meth["tier"]["label"]
-        v_headline = f"Verdict: {_meth['verdict_line']}."
-        v_action   = _meth["action"]
-    else:
-        v_color, v_avg, v_label = sc_color, fit, _score_label(fit)
-        v_headline, v_action = "", ""
+        v_sub += f" · methodology {_meth['average']}/5"
     if _meth:
         _tier = _meth["tier"]
         _rows = ""
@@ -403,7 +406,7 @@ def generate_html_report(company: str, result: dict, mode: str = "deep") -> str:
     <div class="score-bubble" style="--sc:{v_color};background:{v_color}12">
       <div class="num">{v_avg}</div>
       <div class="fit">{v_label}</div>
-      <div class="lbl">Verdict / 5 · engine diagnostic {fit}/100</div>
+      <div class="lbl">Fit / 100 · {v_sub}</div>
     </div>
     <div style="flex:1">
       {_state_badge(state)}{_delivery_badge(data.get("csr_delivery_model"))}

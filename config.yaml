@@ -701,6 +701,53 @@ budget_false_positives:
   - "valuation of"
   - "net profit"
 
+# ── Search hygiene: official sources only ────────────────────────────────────
+# Search results whose domain matches the blocklist are dropped before any
+# text is fetched — forums, social media and blog platforms are not evidence.
+# Results on priority domains (regulators, exchanges, the portals we trust)
+# are ranked first. LinkedIn is intentionally NOT blocked: the decision-maker
+# source reads LinkedIn's own published snippets.
+search_domain_blocklist:
+  - "reddit.com"
+  - "quora.com"
+  - "medium.com"
+  - "blogspot."
+  - "wordpress."
+  - "tumblr."
+  - "facebook.com"
+  - "instagram.com"
+  - "twitter.com"
+  - "x.com"
+  - "youtube.com"
+  - "pinterest."
+  - "glassdoor."
+  - "indeed."
+  - "ambitionbox.com"
+  - "mouthshut.com"
+  - "slideshare.net"
+  - "scribd.com"
+  - "studocu.com"
+  - "fandom.com"
+  - "wikipedia.org"
+
+search_domain_priority:
+  - ".gov.in"
+  - "mca.gov.in"
+  - "csr.gov.in"
+  - "nseindia.com"
+  - "bseindia.com"
+  - "sebi.gov.in"
+
+# ── Claude full-company analysis (ported from the senior's fork) ─────────────
+# Runs in Deep Research mode when ANTHROPIC_API_KEY is set. Produces the AI
+# Analyst panel: narrative, spend trend, programmes, partners, decision-makers,
+# red flags, contact pathway, 17 criteria, open questions. Its fit score is a
+# DIAGNOSTIC — the verdict of record stays the methodology scorecard.
+anthropic_analysis:
+  enabled: true
+  model: "claude-sonnet-4-5"
+  tpm_limit: 30000
+
 # ── Semantic alignment scoring (LLM) ─────────────────────────────────────────
 # Reads org_mission + fetched CSR evidence and judges alignment by MEANING.
 # Can only RAISE the focus-alignment dimension (never lower it).

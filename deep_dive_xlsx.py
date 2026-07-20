@@ -80,9 +80,11 @@ def generate_deep_dive_xlsx(company: str, result: dict, cfg: dict) -> bytes:
         "HYBRID": "Enter as a delivery-excellence partner strengthening their education portfolio.",
         "IMPLEMENTER": "Enter as a specialist curriculum/tech partner, not a grant recipient.",
     }.get(dm, f"{TO_CONFIRM} — delivery model unclear from sources.")
+    res_tier = result.get("scoring_tier", {}) or {}
     for label, value in [
-        ("The call",       f"{tier['label']} — {meth['average']} / 5"
-                            f"   (engine diagnostic {result.get('fit_score', 0)}/100)"),
+        ("The call",       f"{res_tier.get('label', tier['label'])} — "
+                            f"{result.get('fit_score', 0)}/100"
+                            f"   (methodology {meth['average']} / 5)"),
         ("Why it lands there", result.get("strategic_insight", "")),
         ("The catch",      catch),
         ("The way in",     way_in),
@@ -148,7 +150,9 @@ def generate_deep_dive_xlsx(company: str, result: dict, cfg: dict) -> bytes:
     # ── 5. Approach ──────────────────────────────────────────────────────────
     ws = _sheet(wb, "5. Approach", [26, 100])
     r = _header(ws, 1, ["How to enter", "Given the shape of the portfolio"])
-    r = _row(ws, r, ["Recommended action", meth.get("action", "")])
+    r = _row(ws, r, ["Recommended action",
+                     (result.get("scoring_tier", {}) or {}).get("action",
+                                                                 meth.get("action", ""))])
     r = _row(ws, r, ["Delivery-model angle", way_in])
     r = _row(ws, r, ["Strategic insight", result.get("strategic_insight", "")])
 

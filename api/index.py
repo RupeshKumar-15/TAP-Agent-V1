@@ -70,6 +70,44 @@ def research():
     cfg     = load_cfg()
     meth    = derive_criteria(company, result, cfg)
 
+    # Claude full-company analysis (deep mode only; degrades silently to None
+    # without ANTHROPIC_API_KEY). Its fit score is a diagnostic — the verdict
+    # of record remains the methodology scorecard.
+    analysis = None
+    if mode == "deep":
+        try:
+            from llm_analysis import analyze_company
+            from textproc import build_sources_manifest
+            analysis = analyze_company(
+                company,
+                cfg.get("org_mission", ""),
+                sources,
+                build_sources_manifest(sources),
+            )
+        except Exception:
+            import logging
+            logging.getLogger("tap.api").exception("analysis failed — continuing without it")
+            analysis = None
+    result["analysis"] = analysis
+
+    # ── Merged scoring (fork's model): when the Claude analysis is available
+    # its holistic fit_score IS the fit score; the deterministic engine score
+    # is kept as the fallback (used whenever the LLM is unavailable) and
+    # remains visible as a diagnostic. One verdict, one source of truth.
+    if analysis and analysis.get("fit_score"):
+        from scorer import get_scoring_tier, score_band
+        result["engine_fit_score"] = result["fit_score"]
+        result["fit_score"]        = int(analysis["fit_score"])
+        result["scoring_tier"]     = get_scoring_tier(result["fit_score"])
+        result["band"]             = score_band(result["fit_score"], cfg)
+        result["score_source"]     = "claude_analysis"
+        rationale = (analysis.get("fit_rationale") or "").replace("**", "")
+        if rationale:
+            result["strategic_insight"] = f"{rationale} {result.get('strategic_insight','')}"
+    else:
+        result["engine_fit_score"] = result["fit_score"]
+        result["score_source"]     = "deterministic_engine"
+
     # ── Deep mode: generate all report files now and embed them in the page
     #    (serverless functions share no memory between requests, so there is
     #    no session to fetch them from later) ──────────────────────────────────
@@ -94,10 +132,15 @@ def research():
 
         export = dict(result)
         # THE single verdict, mirrored at the top level of the JSON
+        _t = result.get("scoring_tier", {}) or {}
         export["verdict"] = {
-            "tier": meth["tier"]["label"], "average": meth["average"],
-            "action": meth["action"], "source": "methodology_scorecard",
-            "engine_diagnostic_score": result.get("fit_score", 0),
+            "fit_score": result.get("fit_score", 0),
+            "tier": _t.get("label", ""), "action": _t.get("action", ""),
+            "source": result.get("score_source", "deterministic_engine"),
+            "engine_fit_score": result.get("engine_fit_score",
+                                            result.get("fit_score", 0)),
+            "methodology_average": meth["average"],
+            "methodology_tier": meth["tier"]["label"],
         }
         export["sources"] = [
             {k: v for k, v in s.items() if k not in ("text", "people_hits")}
