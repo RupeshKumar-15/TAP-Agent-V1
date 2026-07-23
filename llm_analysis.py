@@ -830,6 +830,78 @@ def _backfill_narrative_gaps(result: dict, company: str, found_count: int) -> di
     return result
 
 
+# ── Decision-maker matcher — CURRENT roles only ──────────────────────────────
+def _people_match_prompt(company: str, raw_hits_text: str) -> str:
+    return f"""Identify which LinkedIn results are CURRENT CSR / sustainability / foundation decision-makers at {company}, using ONLY the snippets below.
+
+HITS (each line: subject_name | title | url | snippet):
+\"\"\"
+{raw_hits_text[:3500]}
+\"\"\"
+
+Rules:
+- The person MUST currently hold the role AT {company}. If the snippet shows "former", "ex-", "until 20XX", "previously", "alumni", or a past end-date, set is_current_csr_role=false and cap match_confidence at 25.
+- Use ONLY the subject_name as the person — never a name that appears only inside the snippet body (those are "People also viewed" sidebar entries, not this profile's owner).
+- Prefer India-based roles. If the role is clearly at a different company, drop it.
+- Only include linkedin_url if a literal linkedin.com/in/ URL is in that hit.
+- tenure_status from date language: NEW_UNDER_1YR / ESTABLISHED_1_3YR / ENTRENCHED_3YR_PLUS / UNKNOWN.
+
+Return ONLY valid JSON:
+{{"people": [{{"name": "<subject name>", "title": "<current title>", "is_current_csr_role": <bool>, "match_confidence": <0-100>, "linkedin_url": "<url or empty>", "tenure_status": "<NEW_UNDER_1YR|ESTABLISHED_1_3YR|ENTRENCHED_3YR_PLUS|UNKNOWN>", "reasoning": "<short>"}}]}}"""
+
+
+def match_people_from_search(company: str, hits: list):
+    """
+    Filters raw people-search hits down to CURRENT CSR decision-makers only.
+    Returns [] silently if the LLM is unavailable — callers keep their
+    keyword-extracted list (marked unverified) in that case.
+    """
+    if not analysis_enabled() or not hits:
+        return []
+    lines = []
+    for h in hits[:20]:
+        subject = (h.get("subject_name") or "").strip()
+        title   = (h.get("title") or "").strip()
+        url     = (h.get("url") or h.get("href") or "").strip()
+        snippet = (h.get("snippet") or h.get("body") or "").strip()
+        if not (subject or title or snippet):
+            continue
+        lines.append(f"{subject} | {title} | {url} | {snippet[:180]}")
+    raw = "\n".join(lines)
+    if not raw.strip():
+        return []
+
+    reply = call_anthropic_chat(_people_match_prompt(company, raw),
+                                max_tokens=1000, temperature=0.0,
+                                caller=f"match_people:{company}")
+    parsed = parse_json_response(reply)
+    people = parsed.get("people") if isinstance(parsed, dict) else None
+    if not isinstance(people, list):
+        return []
+
+    out = []
+    for p in people:
+        if not isinstance(p, dict):
+            continue
+        name = (p.get("name") or "").strip()
+        if not name:
+            continue
+        ten = p.get("tenure_status", "UNKNOWN")
+        out.append({
+            "name": name,
+            "title": (p.get("title") or "").strip()[:90],
+            "is_current_csr_role": bool(p.get("is_current_csr_role")),
+            "match_confidence": clamp_int(p.get("match_confidence"), 0, 100, 0),
+            "linkedin_url": (p.get("linkedin_url") or "").strip(),
+            "tenure_status": ten if ten in {"NEW_UNDER_1YR", "ESTABLISHED_1_3YR",
+                                            "ENTRENCHED_3YR_PLUS", "UNKNOWN"} else "UNKNOWN",
+            "reasoning": (p.get("reasoning") or "").strip()[:160],
+        })
+    out.sort(key=lambda x: x["match_confidence"], reverse=True)
+    # Keep only people the model judged CURRENT with reasonable confidence.
+    return [p for p in out if p["is_current_csr_role"] and p["match_confidence"] >= 50][:8]
+
+
 # ── Entry point ──────────────────────────────────────────────────────────────
 def analyze_company(company: str, mission: str, sources: list,
                     sources_manifest: str, temperature: float = 0.0):

@@ -341,14 +341,6 @@ def _analysis_sections(a: dict) -> str:
         out += (f"<section class='section'><h2>Partners (AI-read)</h2><table>"
                 f"<tr><th>Organisation</th><th>Relationship</th></tr>{rows}</table></section>")
 
-    dms = [d for d in (a.get("decision_makers") or []) if d.get("name")][:6]
-    if dms:
-        rows = "".join(f"<tr><td>{_e(d['name'])}</td><td class='small'>{_e(d.get('title',''))}</td>"
-                       f"<td class='small'>{_e(d.get('tenure_status','UNKNOWN'))}</td></tr>"
-                       for d in dms)
-        out += (f"<section class='section'><h2>Decision-makers</h2><table>"
-                f"<tr><th>Name</th><th>Title</th><th>Tenure</th></tr>{rows}</table></section>")
-
     cp = (a.get("contact_pathway") or {}).get("channel", "")
     if cp:
         out += (f"<section class='section'><h2>Contact pathway</h2>"
@@ -409,6 +401,28 @@ def _evidence_sections(result: dict) -> str:
             for p in partners[:8])
         out += (f"<h3>Funded / implementing partners (from fetched text)</h3>"
                 f"<table><tr><th>Partner</th><th>Excerpt</th></tr>{rows}</table>")
+
+    dms = [d for d in (data.get("decision_makers") or []) if d.get("name")][:8]
+    if dms:
+        verified = data.get("decision_makers_verified")
+        note = ("Filtered to <b>current</b> CSR role-holders (LLM-checked tenure)."
+                if verified else
+                "<b>Unverified</b> — tenure not LLM-checked; some may have left. "
+                "Always confirm the live profile before outreach.")
+        rows = ""
+        for d in dms:
+            cur = d.get("current_role")
+            badge = ("<span class='status-pill status-good' style='margin-left:0'>current</span>"
+                     if cur is True else
+                     "<span class='status-pill status-mid' style='margin-left:0'>verify</span>")
+            link = _cite(d.get("linkedin_url") or d.get("source_url"), "LinkedIn")
+            rows += (f"<tr><td>{_e(d['name'])} {badge}</td>"
+                     f"<td class='small'>{_e(d.get('title',''))}</td>"
+                     f"<td class='small'>{_e(d.get('tenure_status','UNKNOWN'))}</td>"
+                     f"<td>{link or '—'}</td></tr>")
+        out += (f"<h3>CSR decision-makers</h3><p class='small'>{note}</p>"
+                f"<table><tr><th>Name</th><th>Title</th><th>Tenure</th>"
+                f"<th>Profile</th></tr>{rows}</table>")
 
     verif = data.get("verification", {}) or {}
     checks = verif.get("checks") or []

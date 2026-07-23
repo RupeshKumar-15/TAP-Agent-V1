@@ -482,10 +482,13 @@ def fetch_people_sources(company: str) -> dict:
     'people_hits' list of {title, snippet, url} preserved for the parser.
     """
     hits = []
+    # Present-tense phrasing ("present", "current") biases search toward
+    # people still in the role; the LLM people-matcher then drops any
+    # former/ex/until-20XX hits that slip through (search cannot read tenure).
     queries = [
-        f'site:linkedin.com/in "{company}" "CSR" OR "corporate social responsibility" India',
-        f'site:linkedin.com/in "{company}" "head" sustainability OR CSR',
-        f'"{company}" "head of CSR" OR "CSR head" OR "chief sustainability officer" India name',
+        f'site:linkedin.com/in "{company}" ("CSR" OR "corporate social responsibility" OR sustainability) India present',
+        f'site:linkedin.com/in "current" "{company}" ("head of CSR" OR "CSR head" OR "chief sustainability officer") India',
+        f'"{company}" "head of CSR" OR "CSR head" OR "chief sustainability officer" India',
     ]
     for q in queries:
         for r in _search(q, max_results=5):
@@ -496,8 +499,12 @@ def fetch_people_sources(company: str) -> dict:
                 continue
             blob = f"{title} {body}"
             if _mentions_company(company, blob):
-                hits.append({"title": title, "snippet": body, "url": url})
-        if len(hits) >= 6:
+                # subject_name = the profile's OWN name (from title/URL), kept
+                # apart from body text so "People also viewed" sidebar names
+                # in the snippet are never promoted to decision-makers.
+                hits.append({"title": title, "snippet": body, "url": url,
+                             "subject_name": _linkedin_subject_name(title, url)})
+        if len(hits) >= 8:
             break
 
     if not hits:
@@ -508,6 +515,25 @@ def fetch_people_sources(company: str) -> dict:
                        "FOUND", "search_snippets")
     src["people_hits"] = hits[:10]
     return src
+
+
+def _linkedin_subject_name(title: str, url: str) -> str:
+    """
+    The subject of a LinkedIn profile = the name in the result title
+    ("Name - Title - Company | LinkedIn"), falling back to the /in/ URL slug.
+    Names that appear only in the snippet body are 'People also viewed'
+    sidebar noise and must NOT be treated as the profile's owner.
+    """
+    t = (title or "").split("|")[0].split(" - ")[0].split(" – ")[0].strip()
+    if re.match(r"^[A-Z][a-z'’.\-]+(?:\s+[A-Z][a-z'’.\-]+){1,2}$", t):
+        return t
+    m = re.search(r"/in/([a-z0-9\-]+)", url or "", re.IGNORECASE)
+    if m:
+        slug = re.sub(r"-[0-9a-f]{6,}$", "", m.group(1))       # drop id suffix
+        parts = [p for p in slug.split("-") if p and not p.isdigit()]
+        if 2 <= len(parts) <= 3:
+            return " ".join(p.capitalize() for p in parts)
+    return ""
 
 
 # ─────────────────────────────────────────────────────────────────────────────

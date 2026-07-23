@@ -90,6 +90,43 @@ def research():
             analysis = None
     result["analysis"] = analysis
 
+    # ── Decision-makers: keep only CURRENT CSR role-holders ─────────────────
+    # The keyword extractor returns anyone whose LinkedIn snippet mentions the
+    # company — including people who LEFT years ago and 'People also viewed'
+    # sidebar names. The LLM matcher reads tenure language and drops former/ex
+    # roles, keeping only current subjects. Without a key we cannot verify
+    # tenure, so the keyword list is kept but flagged UNVERIFIED.
+    if mode == "deep":
+        people_src = next((s for s in sources
+                           if s.get("source_name") == "people_search"), None)
+        hits = (people_src or {}).get("people_hits", []) if people_src else []
+        refined = []
+        try:
+            from llm_analysis import match_people_from_search, analysis_enabled
+            if hits:
+                refined = match_people_from_search(company, hits)
+        except Exception:
+            import logging
+            logging.getLogger("tap.api").exception("people match failed")
+            refined = []
+
+        data = result.setdefault("data", {})
+        if refined:
+            data["decision_makers"] = [{
+                "name": p["name"], "title": p["title"],
+                "linkedin_url": p.get("linkedin_url", ""),
+                "tenure_status": p.get("tenure_status", "UNKNOWN"),
+                "current_role": True,
+                "source_url": p.get("linkedin_url", ""),
+                "excerpt": p.get("reasoning", ""),
+            } for p in refined]
+            data["decision_makers_verified"] = True
+        else:
+            # No LLM verification available — mark existing rows unverified.
+            for d in data.get("decision_makers", []) or []:
+                d.setdefault("current_role", None)
+            data["decision_makers_verified"] = False
+
     # ── Merged scoring (fork's model): when the Claude analysis is available
     # its holistic fit_score IS the fit score; the deterministic engine score
     # is kept as the fallback (used whenever the LLM is unavailable) and
